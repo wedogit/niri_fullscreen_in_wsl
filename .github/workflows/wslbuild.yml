@@ -2,13 +2,7 @@
 name: Build WSLg System Distro
 
 on:
-  # 手动触发
   workflow_dispatch:
-  # 自动触发：可按需启用 push 或 pull_request
-  # push:
-  #   branches: [ main ]
-  # pull_request:
-  #   branches: [ main ]
 
 jobs:
   build:
@@ -28,21 +22,40 @@ jobs:
           echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
           echo "--------------------------硬盘信息--------------------------"
           echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
-      # 1. 检出代码（包含子模块）
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'           # 自动递归拉取所有子模块
-          fetch-depth: 0                    # 获取完整历史，便于获取版本号
+          submodules: 'recursive'
+          fetch-depth: 0
 
-      # 2. 安装构建依赖（Docker, Go, jq 等）
-      - name: Install dependencies
+      # 修复：先清理冲突的包，再安装 Docker
+      - name: Install dependencies (fixed)
         run: |
           sudo apt-get update
-          sudo apt-get install -y docker.io golang-go jq
+          # 移除可能冲突的 containerd 包
+          sudo apt-get remove -y containerd containerd.io docker docker-engine docker.io || true
+          # 清理 Docker 相关残留
+          sudo rm -rf /var/lib/docker
+          sudo rm -rf /var/lib/containerd
+          # 安装必要的依赖
+          sudo apt-get install -y \
+            ca-certificates \
+            curl \
+            gnupg \
+            lsb-release \
+            golang-go \
+            jq \
+            make \
+            git
 
-      # 3. 手动克隆必要的 vendor 仓库（官方文档要求）
-      #    注意：构建脚本期望这些源码放在 wslg/vendor/ 下
+      # 使用官方 Docker 安装脚本（更可靠）
+      - name: Install Docker
+        run: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          # 将当前用户添加到 docker 组
+          sudo usermod -aG docker $USER
+
       - name: Clone vendor repositories
         run: |
           mkdir -p wslg/vendor
@@ -67,11 +80,9 @@ jobs:
             https://gitlab.freedesktop.org/mesa/mesa.git \
             wslg/vendor/mesa
 
-      # 4. 应用 Weston 补丁（添加 Ctrl+Alt+Backspace 全屏快捷键）
       - name: Apply Weston patch (Ctrl+Alt+Backspace fullscreen)
         run: |
           cd wslg/vendor/weston
-          # 使用 cat 和 patch 命令应用补丁内容
           cat << 'EOF' | patch -p1
           diff --git a/rdprail-shell/shell.c b/rdprail-shell/shell.c
           index 75fc8367..373bb016 100644
@@ -89,31 +100,35 @@ jobs:
                         weston_compositor_add_key_binding(ec, KEY_F4,
                                                   MODIFIER_ALT,
           EOF
-          # 验证补丁是否成功应用
-          git diff --exit-code || echo "Patch applied successfully"
+          # 验证补丁
+          git diff --exit-code || echo "Patch applied"
 
-      # 5. 启动 Docker 服务
       - name: Start Docker daemon
-        run: sudo dockerd &
-        # 等待 Docker 就绪
-      - name: Wait for Docker
-        run: while (! docker info > /dev/null 2>&1); do sleep 1; done
+        run: |
+          sudo systemctl unmask docker
+          sudo systemctl start docker
+          # 等待 Docker 就绪
+          for i in {1..30}; do
+            if docker info > /dev/null 2>&1; then
+              echo "Docker is ready"
+              break
+            fi
+            sleep 2
+          done
 
-      # 6. 构建 WSLg 系统发行版（生成 VHD 文件）
-      #    使用官方推荐的 build-and-export.sh 脚本
+      # 验证 Docker 能正常工作
+      - name: Verify Docker
+        run: docker run hello-world
+
       - name: Build system distro
         working-directory: ./wslg
         run: |
-          # 给脚本执行权限
           chmod +x build-and-export.sh
-          # 执行构建，输出 system_x64.vhd
           ./build-and-export.sh
 
-      # 7. 上传构建产物（VHD 文件）
       - name: Upload VHD artifact
         uses: actions/upload-artifact@v4
         with:
           name: wslg-system-vhd
           path: wslg/system_x64.vhd
-          # 保留周期（天数），可按需调整
           retention-days: 30
