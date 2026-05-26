@@ -1,0 +1,119 @@
+# File: .github/workflows/build-wslg.yml
+name: Build WSLg System Distro
+
+on:
+  # 手动触发
+  workflow_dispatch:
+  # 自动触发：可按需启用 push 或 pull_request
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check Server Performance(检查服务器性能)
+        run: |
+          echo "警告⚠"
+          echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+          echo -e "已知CPU型号（降序）：7763，8370C，8272CL，8171M，E5-2673 \n"
+          echo "--------------------------CPU信息--------------------------"
+          echo "CPU物理数量：$(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+          echo -e "CPU核心信息：$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+          echo "--------------------------内存信息--------------------------"
+          echo "已安装内存详细信息："
+          echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
+          echo "--------------------------硬盘信息--------------------------"
+          echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+      # 1. 检出代码（包含子模块）
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'           # 自动递归拉取所有子模块
+          fetch-depth: 0                    # 获取完整历史，便于获取版本号
+
+      # 2. 安装构建依赖（Docker, Go, jq 等）
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io golang-go jq
+
+      # 3. 手动克隆必要的 vendor 仓库（官方文档要求）
+      #    注意：构建脚本期望这些源码放在 wslg/vendor/ 下
+      - name: Clone vendor repositories
+        run: |
+          mkdir -p wslg/vendor
+          # FreeRDP (working 分支)
+          git clone --branch working \
+            https://github.com/microsoft/FreeRDP-mirror.git \
+            wslg/vendor/FreeRDP
+          # Weston (working 分支)
+          git clone --branch working \
+            https://github.com/microsoft/weston-mirror.git \
+            wslg/vendor/weston
+          # PulseAudio (working 分支)
+          git clone --branch working \
+            https://github.com/microsoft/PulseAudio-mirror.git \
+            wslg/vendor/pulseaudio
+          # DirectX-Headers (v1.608.0 标签)
+          git clone --branch v1.608.0 \
+            https://github.com/microsoft/DirectX-Headers.git \
+            wslg/vendor/DirectX-Headers-1.0
+          # Mesa (mesa-23.1.0 分支)
+          git clone --branch mesa-23.1.0 \
+            https://gitlab.freedesktop.org/mesa/mesa.git \
+            wslg/vendor/mesa
+
+      # 4. 应用 Weston 补丁（添加 Ctrl+Alt+Backspace 全屏快捷键）
+      - name: Apply Weston patch (Ctrl+Alt+Backspace fullscreen)
+        run: |
+          cd wslg/vendor/weston
+          # 使用 cat 和 patch 命令应用补丁内容
+          cat << 'EOF' | patch -p1
+          diff --git a/rdprail-shell/shell.c b/rdprail-shell/shell.c
+          index 75fc8367..373bb016 100644
+          --- a/rdprail-shell/shell.c
+          +++ b/rdprail-shell/shell.c
+          @@ -4594,6 +4594,10 @@ shell_add_bindings(struct weston_compositor *ec, struct desktop_shell *shell)
+                                                    MODIFIER_CTRL | MODIFIER_ALT,
+                                                    terminate_binding, ec);
+          
+          +       weston_compositor_add_key_binding(ec, KEY_BACKSPACE,
+          +                                        MODIFIER_CTRL | MODIFIER_ALT,
+          +                                        fullscreen_binding, ec);
+          +
+                if (shell->allow_alt_f4_to_close_app)
+                        weston_compositor_add_key_binding(ec, KEY_F4,
+                                                  MODIFIER_ALT,
+          EOF
+          # 验证补丁是否成功应用
+          git diff --exit-code || echo "Patch applied successfully"
+
+      # 5. 启动 Docker 服务
+      - name: Start Docker daemon
+        run: sudo dockerd &
+        # 等待 Docker 就绪
+      - name: Wait for Docker
+        run: while (! docker info > /dev/null 2>&1); do sleep 1; done
+
+      # 6. 构建 WSLg 系统发行版（生成 VHD 文件）
+      #    使用官方推荐的 build-and-export.sh 脚本
+      - name: Build system distro
+        working-directory: ./wslg
+        run: |
+          # 给脚本执行权限
+          chmod +x build-and-export.sh
+          # 执行构建，输出 system_x64.vhd
+          ./build-and-export.sh
+
+      # 7. 上传构建产物（VHD 文件）
+      - name: Upload VHD artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wslg-system-vhd
+          path: wslg/system_x64.vhd
+          # 保留周期（天数），可按需调整
+          retention-days: 30
