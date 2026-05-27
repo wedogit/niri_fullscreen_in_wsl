@@ -87,8 +87,7 @@ jobs:
       - name: Replace Weston shell.c with pre-patched version
         run: |
           # 直接从您的仓库下载已修改的 shell.c
-          curl -o wslg/vendor/weston/rdprail-shell/shell.c \
-            https://raw.githubusercontent.com/wedogit/niri_fullscreen_in_wsl/main/shell.c
+          cp shell.c wslg/vendor/weston/rdprail-shell/shell.c
           
           # 确保文件格式正确
           dos2unix wslg/vendor/weston/rdprail-shell/shell.c
