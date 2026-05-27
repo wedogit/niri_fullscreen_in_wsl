@@ -116,8 +116,9 @@ jobs:
 
       # 7. 验证 Docker 能正常工作
       - name: Verify Docker
-        run: docker run hello-world
-             pwd
+        run:  |
+            docker run hello-world
+            pwd
 
       # 8. 构建系统发行版
       - name: Build system distro
