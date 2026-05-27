@@ -9,26 +9,14 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Check Server Performance(检查服务器性能)
-        run: |
-          echo "警告⚠"
-          echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
-          echo -e "已知CPU型号（降序）：7763，8370C，8272CL，8171M，E5-2673 \n"
-          echo "--------------------------CPU信息--------------------------"
-          echo "CPU物理数量：$(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
-          echo -e "CPU核心信息：$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
-          echo "--------------------------内存信息--------------------------"
-          echo "已安装内存详细信息："
-          echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
-          echo "--------------------------硬盘信息--------------------------"
-          echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+      # 1. 检出代码（包含子模块）
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: 0
 
-      # 修复：先清理冲突的包，再安装 Docker
+      # 2. 安装依赖
       - name: Install dependencies (fixed)
         run: |
           sudo apt-get update
@@ -46,16 +34,17 @@ jobs:
             golang-go \
             jq \
             make \
-            git
+            git \
+            dos2unix
 
-      # 使用官方 Docker 安装脚本（更可靠）
+      # 3. 安装 Docker
       - name: Install Docker
         run: |
           curl -fsSL https://get.docker.com -o get-docker.sh
           sudo sh get-docker.sh
-          # 将当前用户添加到 docker 组
           sudo usermod -aG docker $USER
 
+      # 4. 克隆 vendor 仓库
       - name: Clone vendor repositories
         run: |
           mkdir -p wslg/vendor
@@ -80,29 +69,25 @@ jobs:
             https://gitlab.freedesktop.org/mesa/mesa.git \
             wslg/vendor/mesa
 
-      - name: Apply Weston patch (Ctrl+Alt+Backspace fullscreen)
+      # 5. 替换 Weston shell.c 文件 ⭐️ 关键修改
+      - name: Replace Weston shell.c with pre-patched version
         run: |
-          cd wslg/vendor/weston
-          cat << 'EOF' | patch -p1
-          diff --git a/rdprail-shell/shell.c b/rdprail-shell/shell.c
-          index 75fc8367..373bb016 100644
-          --- a/rdprail-shell/shell.c
-          +++ b/rdprail-shell/shell.c
-          @@ -4594,6 +4594,10 @@ shell_add_bindings(struct weston_compositor *ec, struct desktop_shell *shell)
-                                                    MODIFIER_CTRL | MODIFIER_ALT,
-                                                    terminate_binding, ec);
+          # 直接从您的仓库下载已修改的 shell.c
+          curl -o wslg/vendor/weston/rdprail-shell/shell.c \
+            https://raw.githubusercontent.com/wedogit/niri_fullscreen_in_wsl/main/shell.c
           
-          +       weston_compositor_add_key_binding(ec, KEY_BACKSPACE,
-          +                                        MODIFIER_CTRL | MODIFIER_ALT,
-          +                                        fullscreen_binding, ec);
-          +
-                if (shell->allow_alt_f4_to_close_app)
-                        weston_compositor_add_key_binding(ec, KEY_F4,
-                                                  MODIFIER_ALT,
-          EOF
-          # 验证补丁
-          git diff --exit-code || echo "Patch applied"
+          # 确保文件格式正确
+          dos2unix wslg/vendor/weston/rdprail-shell/shell.c
+          
+          # 验证修改已应用
+          if grep -q "KEY_BACKSPACE, ec" wslg/vendor/weston/rdprail-shell/shell.c; then
+            echo "✓ Shell.c patched successfully"
+          else
+            echo "Error: Patch verification failed!"
+            exit 1
+          fi
 
+      # 6. 启动 Docker 服务
       - name: Start Docker daemon
         run: |
           sudo systemctl unmask docker
@@ -116,16 +101,18 @@ jobs:
             sleep 2
           done
 
-      # 验证 Docker 能正常工作
+      # 7. 验证 Docker 能正常工作
       - name: Verify Docker
         run: docker run hello-world
 
+      # 8. 构建系统发行版
       - name: Build system distro
         working-directory: ./wslg
         run: |
           chmod +x build-and-export.sh
           ./build-and-export.sh
 
+      # 9. 上传构建产物
       - name: Upload VHD artifact
         uses: actions/upload-artifact@v4
         with:
