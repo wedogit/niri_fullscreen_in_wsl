@@ -4588,9 +4588,12 @@ static void
 shell_add_bindings(struct weston_compositor *ec, struct desktop_shell *shell)
 {
 	uint32_t mod;
-
 	if (shell->allow_zap)
 		weston_compositor_add_key_binding(ec, KEY_BACKSPACE,
+					          MODIFIER_CTRL | MODIFIER_ALT,
+					          terminate_binding, ec);
+	
+	weston_compositor_add_key_binding(ec, KEY_F,
 					          MODIFIER_CTRL | MODIFIER_ALT,
 					          fullscreen_binding, ec);
 
