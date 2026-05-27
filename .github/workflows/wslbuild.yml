@@ -61,6 +61,7 @@ jobs:
       # 4. 克隆 vendor 仓库
       - name: Clone vendor repositories
         run: |
+          git clone https://github.com/microsoft/wslg wslg
           mkdir -p wslg/vendor
           # FreeRDP (working 分支)
           git clone --branch working \
