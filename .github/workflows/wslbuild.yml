@@ -120,7 +120,7 @@ jobs:
 
       # 8. 构建系统发行版
       - name: Build system distro
-        working-directory: ./wslg
+        working-directory: wslg
         run: |
           chmod +x build-and-export.sh
           ./build-and-export.sh
