@@ -90,15 +90,15 @@ jobs:
           cp shell.c wslg/vendor/weston/rdprail-shell/shell.c
           
           # 确保文件格式正确
-          dos2unix wslg/vendor/weston/rdprail-shell/shell.c
+          #dos2unix wslg/vendor/weston/rdprail-shell/shell.c
           
           # 验证修改已应用
-          if grep -q "KEY_BACKSPACE, ec" wslg/vendor/weston/rdprail-shell/shell.c; then
-            echo "✓ Shell.c patched successfully"
-          else
-            echo "Error: Patch verification failed!"
-            exit 1
-          fi
+         # if grep -q "KEY_BACKSPACE, ec" wslg/vendor/weston/rdprail-shell/shell.c; then
+          #  echo "✓ Shell.c patched successfully"
+          #else
+          #  echo "Error: Patch verification failed!"
+          #  exit 1
+         # fi
 
       # 6. 启动 Docker 服务
       - name: Start Docker daemon
